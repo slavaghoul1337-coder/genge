@@ -69,7 +69,7 @@ app.post("/verifyOwnership", async (req, res) => {
         {
           scheme: "exact",
           network: "base",
-          maxAmountRequired: "0.002",
+          maxAmountRequired: "2",
           resource: `GENGE#verifyOwnership`,
           description: "Verify ownership of GENGE NFT",
           mimeType: "application/json",

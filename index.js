@@ -5,6 +5,7 @@ app.use(express.json());
 
 const RESOURCE_DESCRIPTION = {
   x402Version: 1,
+  payer: "0x0000000000000000000000000000000000000000", // обязателен, даже если пока фиктивный
   accepts: [
     {
       scheme: "exact",
@@ -24,36 +25,40 @@ const RESOURCE_DESCRIPTION = {
           bodyFields: {
             wallet: {
               type: "string",
-              required: true,
+              required: ["wallet"],
               description: "Wallet address",
             },
             tokenId: {
               type: "number",
-              required: true,
+              required: ["tokenId"],
               description: "NFT tokenId",
             },
             txHash: {
               type: "string",
-              required: true,
+              required: ["txHash"],
               description: "Transaction hash",
             },
           },
         },
         output: {
-          success: true,
-          message: "Ownership verified",
+          success: { type: "boolean" },
+          message: { type: "string" },
         },
+      },
+      extra: {
+        provider: "GENGE",
+        category: "Verification",
       },
     },
   ],
 };
 
-// ✅ Новый маршрут для x402scan
+// === GET /verifyOwnership → X402Scan compatibility ===
 app.get("/verifyOwnership", (req, res) => {
   res.status(402).json(RESOURCE_DESCRIPTION);
 });
 
-// ✅ POST остаётся для теста вручную (через curl)
+// === POST /verifyOwnership → Test verification ===
 app.post("/verifyOwnership", (req, res) => {
   const { wallet, tokenId, txHash } = req.body;
   if (!wallet || !txHash || tokenId === undefined) {

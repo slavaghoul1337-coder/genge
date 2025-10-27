@@ -4,19 +4,28 @@ import cors from "cors";
 const app = express();
 app.use(cors());
 
-// ✅ Читаем тело запроса вручную (устраняет баги Vercel)
-app.use((req, res, next) => {
-  let data = "";
-  req.on("data", chunk => {
-    data += chunk;
-  });
+// ✅ универсальный парсер для Vercel
+app.use(async (req, res, next) => {
+  let raw = "";
+  req.on("data", (chunk) => (raw += chunk));
   req.on("end", () => {
-    try {
-      req.body = data ? JSON.parse(data) : {};
-    } catch (err) {
-      return res.status(400).send("Bad JSON");
+    if (!raw) {
+      req.body = {};
+      return next();
     }
-    next();
+    try {
+      if (req.headers["content-type"]?.includes("application/json")) {
+        // убираем невидимые BOM символы
+        raw = raw.trim().replace(/^\uFEFF/, "");
+        req.body = JSON.parse(raw);
+      } else {
+        req.body = {};
+      }
+      next();
+    } catch (e) {
+      console.error("JSON parse error:", e.message);
+      res.status(400).send("Bad JSON Format");
+    }
   });
 });
 
@@ -26,14 +35,17 @@ app.get("/", (req, res) => {
   res.json({ message: "GENGE API is live", x402: true });
 });
 
-app.post("/verifyOwnership", async (req, res) => {
+app.post("/verifyOwnership", (req, res) => {
   const { wallet, tokenId, txHash } = req.body || {};
 
   if (!wallet || tokenId === undefined || !txHash) {
-    return res.status(400).json({ error: "Missing wallet, tokenId or txHash" });
+    return res.status(400).json({
+      error: "Missing wallet, tokenId or txHash",
+      received: req.body,
+    });
   }
 
-  // 🔹 Временный тестовый ответ для x402scan
+  // ✅ тестовый X402Response
   const response = {
     x402Version: 1,
     accepts: [
@@ -55,20 +67,20 @@ app.post("/verifyOwnership", async (req, res) => {
             bodyFields: {
               wallet: { type: "string", required: true, description: "Wallet address" },
               tokenId: { type: "number", required: true, description: "NFT tokenId" },
-              txHash: { type: "string", required: true, description: "Transaction hash" }
-            }
+              txHash: { type: "string", required: true, description: "Transaction hash" },
+            },
           },
           output: {
             success: true,
             wallet,
             tokenId,
             verified: true,
-            message: "Ownership verified (test mode)"
-          }
-        }
-      }
+            message: "Ownership verified (test mode)",
+          },
+        },
+      },
     ],
-    payer: wallet
+    payer: wallet,
   };
 
   res.status(200).json(response);

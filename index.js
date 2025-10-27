@@ -1,35 +1,39 @@
 import express from "express";
-import bodyParser from "body-parser";
 import cors from "cors";
 
 const app = express();
 app.use(cors());
-app.use(express.json());
-app.use(bodyParser.json());
+
+// ✅ Читаем тело запроса вручную (устраняет баги Vercel)
+app.use((req, res, next) => {
+  let data = "";
+  req.on("data", chunk => {
+    data += chunk;
+  });
+  req.on("end", () => {
+    try {
+      req.body = data ? JSON.parse(data) : {};
+    } catch (err) {
+      return res.status(400).send("Bad JSON");
+    }
+    next();
+  });
+});
 
 const PORT = process.env.PORT || 3000;
 
-// ✅ Главная страница
 app.get("/", (req, res) => {
-  res.json({ message: "SPENGE API is live", x402: true });
+  res.json({ message: "GENGE API is live", x402: true });
 });
 
-// ✅ Тестовый эндпоинт verifyOwnership
 app.post("/verifyOwnership", async (req, res) => {
-  const { wallet, tokenId, txHash } = req.body;
+  const { wallet, tokenId, txHash } = req.body || {};
 
   if (!wallet || tokenId === undefined || !txHash) {
     return res.status(400).json({ error: "Missing wallet, tokenId or txHash" });
   }
 
-  // 🔹 Временная заглушка проверки платежа (x402CheckPayment отключен)
-  const paymentOk = true;
-
-  if (!paymentOk) {
-    return res.status(402).json({ error: "Payment required or invalid" });
-  }
-
-  // ✅ Ответ в формате X402Response
+  // 🔹 Временный тестовый ответ для x402scan
   const response = {
     x402Version: 1,
     accepts: [
@@ -37,10 +41,10 @@ app.post("/verifyOwnership", async (req, res) => {
         scheme: "exact",
         network: "base",
         maxAmountRequired: "2",
-        resource: "SPENGE#verifyOwnership",
-        description: "Verify ownership of SPENGE NFT",
+        resource: "GENGE#verifyOwnership",
+        description: "Verify ownership of GENGE NFT or payment transaction",
         mimeType: "application/json",
-        payTo: process.env.PAY_TO || "0xFDB14ec968C075335c3800733F8F9AAB8619E203",
+        payTo: "0xFDB14ec968C075335c3800733F8F9AAB8619E203",
         maxTimeoutSeconds: 10,
         asset: "USDC",
         outputSchema: {
@@ -49,7 +53,7 @@ app.post("/verifyOwnership", async (req, res) => {
             method: "POST",
             bodyType: "json",
             bodyFields: {
-              wallet: { type: "string", required: true, description: "Wallet to check" },
+              wallet: { type: "string", required: true, description: "Wallet address" },
               tokenId: { type: "number", required: true, description: "NFT tokenId" },
               txHash: { type: "string", required: true, description: "Transaction hash" }
             }
@@ -57,7 +61,9 @@ app.post("/verifyOwnership", async (req, res) => {
           output: {
             success: true,
             wallet,
-            tokenId
+            tokenId,
+            verified: true,
+            message: "Ownership verified (test mode)"
           }
         }
       }
@@ -68,7 +74,6 @@ app.post("/verifyOwnership", async (req, res) => {
   res.status(200).json(response);
 });
 
-// ✅ Старт сервера (для локальных тестов)
 app.listen(PORT, () => {
-  console.log(`✅ SPENGE API running on port ${PORT}`);
+  console.log(`✅ GENGE API running on port ${PORT}`);
 });

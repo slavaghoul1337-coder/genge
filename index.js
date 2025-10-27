@@ -5,13 +5,13 @@ app.use(express.json());
 
 const RESOURCE_DESCRIPTION = {
   x402Version: 1,
-  payer: "0x0000000000000000000000000000000000000000", // обязателен, даже если пока фиктивный
+  payer: "0x0000000000000000000000000000000000000000",
   accepts: [
     {
       scheme: "exact",
       network: "base",
       maxAmountRequired: "2",
-      resource: "GENGE#verifyOwnership",
+      resource: "https://genge-api.vercel.app/verifyOwnership",
       description: "Verify ownership of GENGE NFT or payment transaction",
       mimeType: "application/json",
       payTo: "0xFDB14ec968C075335c3800733F8F9AAB8619E203",
@@ -23,34 +23,19 @@ const RESOURCE_DESCRIPTION = {
           method: "POST",
           bodyType: "json",
           bodyFields: {
-            wallet: {
-              type: "string",
-              required: ["wallet"],
-              description: "Wallet address",
-            },
-            tokenId: {
-              type: "number",
-              required: ["tokenId"],
-              description: "NFT tokenId",
-            },
-            txHash: {
-              type: "string",
-              required: ["txHash"],
-              description: "Transaction hash",
-            },
-          },
+            wallet: { type: "string", required: ["wallet"], description: "Wallet address" },
+            tokenId: { type: "number", required: ["tokenId"], description: "NFT tokenId" },
+            txHash: { type: "string", required: ["txHash"], description: "Transaction hash" }
+          }
         },
         output: {
           success: { type: "boolean" },
-          message: { type: "string" },
-        },
+          message: { type: "string" }
+        }
       },
-      extra: {
-        provider: "GENGE",
-        category: "Verification",
-      },
-    },
-  ],
+      extra: { provider: "GENGE", category: "Verification" }
+    }
+  ]
 };
 
 // === GET /verifyOwnership → X402Scan compatibility ===

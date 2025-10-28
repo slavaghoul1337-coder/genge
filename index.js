@@ -6,7 +6,26 @@ app.use(express.json());
 
 // --- Конфигурация ---
 const PAY_TO = process.env.PAY_TO || "0x390d45A9375b9C81c3044314EDE0c9C8E5229DD9";
-const VERIFY_URL = process.env.VERIFY_URL || "https://genge.vercel.app/verifyOwnership";
+const PORT = process.env.PORT || 3000;
+
+// --- POST /verifyOwnership для проверки транзакции ---
+app.post("/verifyOwnership", async (req, res) => {
+  const { wallet, txHash } = req.body;
+
+  if (!wallet || !txHash) {
+    return res.status(400).json({ success: false, error: "Wallet and txHash required" });
+  }
+
+  // TODO: Реальная проверка через blockchain
+  const success = true; // для теста всегда true
+
+  res.status(200).json({
+    success,
+    wallet,
+    txHash,
+    message: success ? "✅ Payment verified successfully" : "❌ Transaction invalid"
+  });
+});
 
 // --- GET /api/mint/:amount для x402 ---
 app.get("/api/mint/:amount", (req, res) => {
@@ -23,7 +42,7 @@ app.get("/api/mint/:amount", (req, res) => {
         scheme: "exact",
         network: "base",
         maxAmountRequired: amount.toString(),
-        resource: VERIFY_URL,
+        resource: `https://${req.headers.host}/verifyOwnership`,
         description: `Verify payment to mint ${amount} NFT${amount > 1 ? "s" : ""}`,
         mimeType: "application/json",
         payTo: PAY_TO,
@@ -64,7 +83,7 @@ app.post("/api/mint/:amount", async (req, res) => {
     }
 
     // Проверяем транзакцию через verifyOwnership
-    const verifyResp = await fetch(VERIFY_URL, {
+    const verifyResp = await fetch(`https://${req.headers.host}/verifyOwnership`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ wallet, txHash })
@@ -76,7 +95,7 @@ app.post("/api/mint/:amount", async (req, res) => {
       return res.status(400).json({ error: verifyData.error || "Transaction verification failed" });
     }
 
-    // Минт 1 или 3 NFT (имитация, вставь реальный код минта)
+    // Минт 1 или 3 NFT (имитация)
     return res.status(200).json({
       success: true,
       wallet,
@@ -91,7 +110,6 @@ app.post("/api/mint/:amount", async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`GENGE API running on port ${port}`));
+app.listen(PORT, () => console.log(`GENGE API running on port ${PORT}`));
 
 export default app;

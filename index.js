@@ -1,18 +1,26 @@
 import express from "express";
 import { ethers } from "ethers";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-// --- Конфигурация ---
-const RPC_URL = process.env.RPC_URL;
-const PAY_TO = process.env.PAY_TO; // твой кошелек, куда переводят $2
+// --- Конфигурация из .env ---
+const RPC_URL = process.env.RPC_URL || "https://rpc.ankr.com/base/your-api-key";
+const PAY_TO = process.env.PAY_TO || "0x390d45A9375b9C81c3044314EDE0c9C8E5229DD9";
 const PORT = process.env.PORT || 3000;
 
-// --- Основное описание ресурса для X402 ---
+// --- ERC-20 ABI для Transfer ---
+const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // Base USDC
+const REQUIRED_AMOUNT = ethers.parseUnits("2", 6); // 2 USDC
+
+const ERC20_ABI = [
+  "event Transfer(address indexed from, address indexed to, uint256 value)"
+];
+
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
+
+// --- Описание ресурса для X402 ---
 const RESOURCE_DESCRIPTION = {
   x402Version: 1,
   payer: "0x0000000000000000000000000000000000000000",
@@ -22,7 +30,7 @@ const RESOURCE_DESCRIPTION = {
       network: "base",
       maxAmountRequired: "2",
       resource: "https://genge.vercel.app/verifyOwnership",
-      description: "Verify payment of $2 USDC to mint GENGE",
+      description: "Verify payment of 2 USDC to PAY_TO wallet",
       mimeType: "application/json",
       payTo: PAY_TO,
       maxTimeoutSeconds: 10,
@@ -33,8 +41,8 @@ const RESOURCE_DESCRIPTION = {
           method: "POST",
           bodyType: "json",
           bodyFields: {
-            wallet: { type: "string", required: ["wallet"], description: "Wallet address" },
-            txHash: { type: "string", required: ["txHash"], description: "Transaction hash" }
+            wallet: { type: "string", required: ["wallet"], description: "Wallet address that sent payment" },
+            txHash: { type: "string", required: ["txHash"], description: "Transaction hash of the payment" }
           }
         },
         output: {
@@ -42,45 +50,47 @@ const RESOURCE_DESCRIPTION = {
           message: { type: "string" }
         }
       },
-      extra: { provider: "GENGE", category: "Verification" }
+      extra: { provider: "GENGE", category: "Payment Verification" }
     }
   ]
 };
 
-// === GET → X402Scan ===
+// --- GET для X402 ---
 app.get("/verifyOwnership", (req, res) => {
   res.status(402).json(RESOURCE_DESCRIPTION);
 });
 
-// === POST → Проверка транзакции $2 ===
+// --- POST проверка оплаты ---
 app.post("/verifyOwnership", async (req, res) => {
   try {
     const { wallet, txHash } = req.body;
-    if (!wallet || !txHash) return res.status(400).json({ error: "Missing wallet or txHash" });
+    if (!wallet || !txHash)
+      return res.status(400).json({ error: "Missing wallet or txHash" });
 
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const tx = await provider.getTransaction(txHash);
+    const txReceipt = await provider.getTransactionReceipt(txHash);
+    if (!txReceipt) return res.status(400).json({ error: "Transaction not found" });
 
-    if (!tx) return res.status(400).json({ error: "Transaction not found" });
+    // Ищем Transfer к PAY_TO
+    const transferEvents = txReceipt.logs
+      .map(log => {
+        try { return usdcContract.interface.parseLog(log); } catch { return null; }
+      })
+      .filter(log => log && log.name === "Transfer");
 
-    const from = tx.from.toLowerCase();
-    const to = tx.to?.toLowerCase();
-    const value = ethers.formatUnits(tx.value, 6); // USDC на Base имеет 6 decimals
+    const matched = transferEvents.find(e =>
+      e.args.from.toLowerCase() === wallet.toLowerCase() &&
+      e.args.to.toLowerCase() === PAY_TO.toLowerCase() &&
+      e.args.value.gte(REQUIRED_AMOUNT)
+    );
 
-    if (from !== wallet.toLowerCase())
-      return res.status(400).json({ error: "Transaction sent from different wallet" });
-    if (to !== PAY_TO.toLowerCase())
-      return res.status(400).json({ error: "Transaction sent to wrong address" });
-    if (parseFloat(value) < 2)
-      return res.status(400).json({ error: "Insufficient payment" });
+    if (!matched) return res.status(400).json({ error: "Transaction does not match required payment" });
 
-    // Всё ок, возвращаем успех
     return res.status(200).json({
       success: true,
       wallet,
       txHash,
       verified: true,
-      message: "✅ Payment verified successfully"
+      message: `✅ Payment of 2 USDC verified successfully from ${wallet} to ${PAY_TO}`
     });
 
   } catch (err) {
@@ -89,5 +99,5 @@ app.post("/verifyOwnership", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`GENGE Payment API running on port ${PORT}`));
+app.listen(PORT, () => console.log(`GENGE API running on port ${PORT}`));
 export default app;

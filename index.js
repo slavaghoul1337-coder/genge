@@ -5,92 +5,77 @@ const app = express();
 app.use(express.json());
 
 // --- Конфигурация из .env ---
-const RPC_URL = process.env.RPC_URL || "https://rpc.ankr.com/base/your-api-key";
-const PAY_TO = process.env.PAY_TO || "0x390d45A9375b9C81c3044314EDE0c9C8E5229DD9";
-const PORT = process.env.PORT || 3000;
+const RPC_URL = process.env.RPC_URL;
+const PAY_TO = process.env.PAY_TO;
+const X402_API = process.env.X402_API;
+const X402_API_KEY = process.env.X402_API_KEY;
+const REQUIRED_AMOUNT = ethers.parseUnits("2", 6); // USDC 6 decimals
+const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // USDC токен на Base
 
-// --- ERC-20 ABI для Transfer ---
-const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // Base USDC
-const REQUIRED_AMOUNT = ethers.parseUnits("2", 6); // 2 USDC
-
-const ERC20_ABI = [
-  "event Transfer(address indexed from, address indexed to, uint256 value)"
-];
-
+// --- RPC Provider ---
 const provider = new ethers.JsonRpcProvider(RPC_URL);
-const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
 
-// --- Описание ресурса для X402 ---
-const RESOURCE_DESCRIPTION = {
-  x402Version: 1,
-  payer: "0x0000000000000000000000000000000000000000",
-  accepts: [
-    {
-      scheme: "exact",
-      network: "base",
-      maxAmountRequired: "2",
-      resource: "https://genge.vercel.app/verifyOwnership",
-      description: "Verify payment of 2 USDC to PAY_TO wallet",
-      mimeType: "application/json",
-      payTo: PAY_TO,
-      maxTimeoutSeconds: 10,
-      asset: "USDC",
-      outputSchema: {
-        input: {
-          type: "http",
-          method: "POST",
-          bodyType: "json",
-          bodyFields: {
-            wallet: { type: "string", required: ["wallet"], description: "Wallet address that sent payment" },
-            txHash: { type: "string", required: ["txHash"], description: "Transaction hash of the payment" }
-          }
-        },
-        output: {
-          success: { type: "boolean" },
-          message: { type: "string" }
-        }
-      },
-      extra: { provider: "GENGE", category: "Payment Verification" }
-    }
-  ]
-};
-
-// --- GET для X402 ---
+// --- GET /verifyOwnership для X402Scan ---
 app.get("/verifyOwnership", (req, res) => {
-  res.status(402).json(RESOURCE_DESCRIPTION);
+  res.status(402).json({
+    x402Version: 1,
+    payer: "0x0000000000000000000000000000000000000000",
+    accepts: [
+      {
+        scheme: "exact",
+        network: "base",
+        maxAmountRequired: "2",
+        resource: "https://genge.vercel.app/verifyOwnership",
+        description: "Verify 2 USDC payment",
+        mimeType: "application/json",
+        payTo: PAY_TO,
+        maxTimeoutSeconds: 10,
+        asset: "USDC",
+        outputSchema: {
+          input: { type: "http", method: "POST", bodyType: "json", bodyFields: { wallet: { type: "string" }, txHash: { type: "string" } } },
+          output: { success: { type: "boolean" }, message: { type: "string" } }
+        },
+        extra: { provider: "GENGE", category: "Verification" }
+      }
+    ]
+  });
 });
 
-// --- POST проверка оплаты ---
+// --- POST /verifyOwnership проверка перевода ERC-20 ---
 app.post("/verifyOwnership", async (req, res) => {
   try {
     const { wallet, txHash } = req.body;
-    if (!wallet || !txHash)
-      return res.status(400).json({ error: "Missing wallet or txHash" });
+    if (!wallet || !txHash) return res.status(400).json({ error: "Missing wallet or txHash" });
 
-    const txReceipt = await provider.getTransactionReceipt(txHash);
-    if (!txReceipt) return res.status(400).json({ error: "Transaction not found" });
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt) return res.status(400).json({ error: "Transaction not found" });
 
-    // Ищем Transfer к PAY_TO
-    const transferEvents = txReceipt.logs
-      .map(log => {
-        try { return usdcContract.interface.parseLog(log); } catch { return null; }
-      })
-      .filter(log => log && log.name === "Transfer");
-
-    const matched = transferEvents.find(e =>
-      e.args.from.toLowerCase() === wallet.toLowerCase() &&
-      e.args.to.toLowerCase() === PAY_TO.toLowerCase() &&
-      e.args.value.gte(REQUIRED_AMOUNT)
+    const transferEvent = receipt.logs.find(
+      log => log.address.toLowerCase() === USDC_ADDRESS.toLowerCase()
     );
 
-    if (!matched) return res.status(400).json({ error: "Transaction does not match required payment" });
+    if (!transferEvent) return res.status(400).json({ error: "No USDC transfer found" });
+
+    // decode log
+    const iface = new ethers.Interface([
+      "event Transfer(address indexed from, address indexed to, uint256 value)"
+    ]);
+    const parsed = iface.parseLog(transferEvent);
+
+    const from = parsed.args.from.toLowerCase();
+    const to = parsed.args.to.toLowerCase();
+    const value = parsed.args.value;
+
+    if (from !== wallet.toLowerCase()) return res.status(400).json({ error: "Transaction sent from wrong wallet" });
+    if (to !== PAY_TO.toLowerCase()) return res.status(400).json({ error: "Transaction sent to wrong address" });
+    if (value.lt(REQUIRED_AMOUNT)) return res.status(400).json({ error: "Insufficient amount" });
 
     return res.status(200).json({
       success: true,
       wallet,
       txHash,
       verified: true,
-      message: `✅ Payment of 2 USDC verified successfully from ${wallet} to ${PAY_TO}`
+      message: "✅ Payment verified successfully"
     });
 
   } catch (err) {
@@ -99,5 +84,6 @@ app.post("/verifyOwnership", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`GENGE API running on port ${PORT}`));
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`GENGE API running on port ${port}`));
 export default app;

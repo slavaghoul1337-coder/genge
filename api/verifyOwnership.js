@@ -11,7 +11,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: "Missing wallet or txHash" });
     }
 
-    // Проверяем транзакцию через Basescan API (аналог Etherscan)
+    // Проверяем транзакцию через Basescan API (аналог Etherscan))
     const apiKey = process.env.BASESCAN_API_KEY;
     const apiUrl = `https://api.basescan.org/api?module=transaction&action=gettxreceiptstatus&txhash=${txHash}&apikey=${apiKey}`;
 

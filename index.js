@@ -8,8 +8,13 @@ app.use(express.json());
 const PAY_TO = process.env.PAY_TO || "0x390d45A9375b9C81c3044314EDE0c9C8E5229DD9";
 const VERIFY_URL = process.env.VERIFY_URL || "https://genge.vercel.app/verifyOwnership";
 
-// --- GET /api/mint/1 для x402 ---
-app.get("/api/mint/1", (req, res) => {
+// --- GET /api/mint/:amount для x402 ---
+app.get("/api/mint/:amount", (req, res) => {
+  const amount = parseInt(req.params.amount);
+  if (![1, 3].includes(amount)) {
+    return res.status(400).json({ error: "Invalid mint amount. Must be 1 or 3" });
+  }
+
   res.status(402).json({
     x402Version: 1,
     payer: PAY_TO,
@@ -17,9 +22,9 @@ app.get("/api/mint/1", (req, res) => {
       {
         scheme: "exact",
         network: "base",
-        maxAmountRequired: "3",
+        maxAmountRequired: amount.toString(),
         resource: VERIFY_URL,
-        description: "Verify payment to mint 1 NFT",
+        description: `Verify payment to mint ${amount} NFT${amount > 1 ? "s" : ""}`,
         mimeType: "application/json",
         payTo: PAY_TO,
         maxTimeoutSeconds: 10,
@@ -45,52 +50,17 @@ app.get("/api/mint/1", (req, res) => {
   });
 });
 
-// --- GET /api/mint/3 для x402 ---
-app.get("/api/mint/3", (req, res) => {
-  res.status(402).json({
-    x402Version: 1,
-    payer: PAY_TO,
-    accepts: [
-      {
-        scheme: "exact",
-        network: "base",
-        maxAmountRequired: "9",
-        resource: VERIFY_URL,
-        description: "Verify payment to mint 3 NFTs",
-        mimeType: "application/json",
-        payTo: PAY_TO,
-        maxTimeoutSeconds: 10,
-        asset: "USDC",
-        outputSchema: {
-          input: {
-            type: "http",
-            method: "POST",
-            bodyType: "json",
-            bodyFields: {
-              wallet: { type: "string", required: ["wallet"], description: "Wallet address" },
-              txHash: { type: "string", required: ["txHash"], description: "Transaction hash" }
-            }
-          },
-          output: {
-            success: { type: "boolean" },
-            message: { type: "string" }
-          }
-        },
-        extra: { provider: "GENGE", category: "Minting" }
-      }
-    ]
-  });
-});
-
-// --- POST /api/mint/1 или /api/mint/3 — минтинг ---
+// --- POST /api/mint/:amount — минтинг ---
 app.post("/api/mint/:amount", async (req, res) => {
   try {
     const { wallet, txHash } = req.body;
-    const amountParam = parseInt(req.params.amount, 10);
-    const mintAmount = amountParam === 3 ? 3 : 1;
+    const amount = parseInt(req.params.amount);
 
     if (!wallet || !txHash) {
       return res.status(400).json({ error: "Wallet and txHash required" });
+    }
+    if (![1, 3].includes(amount)) {
+      return res.status(400).json({ error: "Invalid mint amount. Must be 1 or 3" });
     }
 
     // Проверяем транзакцию через verifyOwnership
@@ -106,13 +76,13 @@ app.post("/api/mint/:amount", async (req, res) => {
       return res.status(400).json({ error: verifyData.error || "Transaction verification failed" });
     }
 
-    // Минтинг (имитация)
+    // Минт 1 или 3 NFT (имитация, вставь реальный код минта)
     return res.status(200).json({
       success: true,
       wallet,
-      minted: mintAmount,
+      minted: amount,
       txHash,
-      message: `✅ Successfully minted ${mintAmount} NFT(s)`
+      message: `✅ Successfully minted ${amount} NFT${amount > 1 ? "s" : ""}`
     });
 
   } catch (err) {

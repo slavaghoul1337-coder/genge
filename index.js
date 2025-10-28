@@ -1,86 +1,102 @@
 import express from "express";
-import { ethers } from "ethers";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(express.json());
 
 // --- Конфигурация ---
-const RPC_URL = process.env.RPC_URL || "https://rpc.ankr.com/base/4d93f615e8a7a794300afd50f0093768551d8bcb3cadce7dccbe986e55cbdf09";
 const PAY_TO = process.env.PAY_TO || "0x390d45A9375b9C81c3044314EDE0c9C8E5229DD9";
-const USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // USDC token на Base
-const MIN_USDC_AMOUNT = 2_000_000n; // 2 USDC, 6 decimals
+const MIN_AMOUNT_USDC = 2; // Минимальная оплата
+const MAX_BATCH = 10;
 
-// --- ERC20 ABI minimal ---
-const ERC20_ABI = [
-  "event Transfer(address indexed from, address indexed to, uint256 value)"
-];
+// --- Фейковый mint (подставь реальную логику минта NFT) ---
+function mintNFT(wallet, quantity) {
+  // Тут можно вызвать контракт или другой сервис
+  return {
+    wallet,
+    quantity,
+    minted: true,
+    message: `✅ Successfully minted ${quantity} NFT(s) for ${wallet}`,
+  };
+}
 
-const provider = new ethers.JsonRpcProvider(RPC_URL);
-const usdcContract = new ethers.Contract(USDC_CONTRACT, ERC20_ABI, provider);
+// --- Проверка оплаты через txHash ---
+async function verifyPayment(wallet, txHash) {
+  try {
+    const res = await fetch(`https://x402.dev/api/checkPayment`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": process.env.X402_API_KEY,
+      },
+      body: JSON.stringify({ wallet, txHash }),
+    });
+    const data = await res.json();
 
-// --- GET ресурс для X402 ---
-app.get("/verifyOwnership", (req, res) => {
-  res.status(402).json({
-    x402Version: 1,
-    payer: "0x0000000000000000000000000000000000000000",
-    accepts: [
-      {
-        scheme: "exact",
-        network: "base",
-        maxAmountRequired: "2",
-        resource: "https://genge.vercel.app/verifyOwnership",
-        description: "Verify USDC payment transaction",
-        mimeType: "application/json",
-        payTo: PAY_TO,
-        maxTimeoutSeconds: 10,
-        asset: "USDC"
-      }
-    ]
+    if (!data.success) {
+      return { success: false, error: data.message || "Payment verification failed" };
+    }
+
+    // Проверяем что платеж пришел на нужный адрес и сумма >= MIN_AMOUNT_USDC
+    if (
+      data.to.toLowerCase() !== PAY_TO.toLowerCase() ||
+      parseFloat(data.amount) < MIN_AMOUNT_USDC
+    ) {
+      return { success: false, error: "Transaction sent to wrong address or insufficient USDC" };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// === POST /verifyOwnership ===
+app.post("/verifyOwnership", async (req, res) => {
+  const { wallet, txHash } = req.body;
+  if (!wallet || !txHash) return res.status(400).json({ error: "wallet and txHash required" });
+
+  const verified = await verifyPayment(wallet, txHash);
+  if (!verified.success) return res.status(400).json({ error: verified.error });
+
+  return res.json({
+    success: true,
+    wallet,
+    txHash,
+    verified: true,
+    message: "✅ Payment verified successfully",
   });
 });
 
-// --- POST проверка транзакции ---
-app.post("/verifyOwnership", async (req, res) => {
-  try {
-    const { wallet, txHash } = req.body;
-    if (!wallet || !txHash) return res.status(400).json({ error: "Missing wallet or txHash" });
+// === Mint endpoints ===
+app.post("/api/mint", async (req, res) => {
+  const { wallet, txHash } = req.body;
+  if (!wallet || !txHash) return res.status(400).json({ error: "wallet and txHash required" });
 
-    const txReceipt = await provider.getTransactionReceipt(txHash);
-    if (!txReceipt) return res.status(400).json({ error: "Transaction not found" });
+  const verified = await verifyPayment(wallet, txHash);
+  if (!verified.success) return res.status(400).json({ error: verified.error });
 
-    // Парсим события Transfer на USDC
-    let valid = false;
-    for (const log of txReceipt.logs) {
-      if (log.address.toLowerCase() === USDC_CONTRACT.toLowerCase()) {
-        try {
-          const parsed = usdcContract.interface.parseLog(log);
-          if (
-            parsed.name === "Transfer" &&
-            parsed.args.from.toLowerCase() === wallet.toLowerCase() &&
-            parsed.args.to.toLowerCase() === PAY_TO.toLowerCase() &&
-            parsed.args.value >= MIN_USDC_AMOUNT
-          ) {
-            valid = true;
-            break;
-          }
-        } catch {}
-      }
-    }
+  return res.json(mintNFT(wallet, 1));
+});
 
-    if (!valid) return res.status(400).json({ error: "Transaction sent to wrong address or amount too low" });
+app.post("/api/mint/3", async (req, res) => {
+  const { wallet, txHash } = req.body;
+  if (!wallet || !txHash) return res.status(400).json({ error: "wallet and txHash required" });
 
-    return res.status(200).json({
-      success: true,
-      wallet,
-      txHash,
-      verified: true,
-      message: "✅ Payment verified successfully"
-    });
+  const verified = await verifyPayment(wallet, txHash);
+  if (!verified.success) return res.status(400).json({ error: verified.error });
 
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Server error", details: err.message });
-  }
+  return res.json(mintNFT(wallet, 3));
+});
+
+app.post("/api/mint/max", async (req, res) => {
+  const { wallet, txHash } = req.body;
+  if (!wallet || !txHash) return res.status(400).json({ error: "wallet and txHash required" });
+
+  const verified = await verifyPayment(wallet, txHash);
+  if (!verified.success) return res.status(400).json({ error: verified.error });
+
+  return res.json(mintNFT(wallet, MAX_BATCH));
 });
 
 const port = process.env.PORT || 3000;
